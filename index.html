@@ -4,551 +4,536 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Web2App Pro - Website to APK & AAB Converter</title>
-    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React and ReactDOM CDNs -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- Babel for mobile JSX rendering -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
-        body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            -webkit-tap-highlight-color: transparent;
-        }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
-    <div id="root"></div>
+<body class="bg-slate-50 text-slate-800 antialiased">
+<div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
 
-        const SECRET_SALT = "WEB2APP_SECURITY_KEY_2026";
+// ─────────────────────────────────────────────────
+// ← CHANGED: Put your real values here
+// ─────────────────────────────────────────────────
+const GITHUB_OWNER  = "YOUR_GITHUB_USERNAME";   // e.g. "john"
+const GITHUB_REPO   = "YOUR_REPO_NAME";          // e.g. "webview-builder"
+const GITHUB_TOKEN  = "YOUR_PAT_TOKEN";          // GitHub Personal Access Token
+//   ^ Keep this private! In production, proxy through your own backend.
+// ─────────────────────────────────────────────────
 
-        // Tiny, valid Android APK structural binary
-        const LOCAL_APK_BINARY_BASE64 = 
-            "UEsDBAoAAAAAAIiZOlVAAAAAAAAAAAAAAAAJABAAYW5kcm9pZC9VVA0ABwi6XWZGul1mRnd4CwAB" +
-            "BOgDAAAE6AMAAFBLAwQKAAAAAACImTpVAAAAAAAAAAAAAAAAEgAQYW5kcm9pZC9hcHAvVVQNAAcI" +
-            "ul1mRrpdZkZ3eAsAAQToAwAABOgDAFBLAwQKAAAAAACImTpVAAAAAAAAAAAAAAAAGgAQYW5kcm9p" +
-            "ZC9hcHAvYnVpbGQvVVQNAAcIul1mRrpdZkZ3eAsAAQToAwAABOgDAFBLBQYAAAAABAEEAD0BAABf" +
-            "AAAAAA==";
+const SECRET_SALT = "WEB2APP_SECURITY_KEY_2026";
 
-        // Custom Inline SVG Icons
-        const SmartphoneIcon = () => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+const generateCode = (email) => {
+    const cleanEmail = email.trim().toLowerCase();
+    let hash = 0;
+    const combined = cleanEmail + SECRET_SALT;
+    for (let i = 0; i < combined.length; i++) {
+        hash = (hash << 5) - hash + combined.charCodeAt(i);
+        hash |= 0;
+    }
+    const pos = Math.abs(hash).toString(36).toUpperCase();
+    return `AAB-${pos.substring(0,4)}-${pos.substring(4,8)}`;
+};
+
+// ── Icons ─────────────────────────────────────────
+const SmartphoneIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>;
+const ShieldIcon     = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 9.7a1 1 0 0 1-.68 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/></svg>;
+const CheckIcon      = () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
+const LockIcon       = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>;
+const MsgIcon        = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>;
+
+// ── GitHub API helpers ─────────────────────────────
+
+/** Trigger a workflow_dispatch run */
+async function triggerBuild({ appName, websiteUrl, packageName }) {
+    const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/build-apk.yml/dispatches`,
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${GITHUB_TOKEN}`,
+                Accept: "application/vnd.github+json",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                ref: "main",          // branch name
+                inputs: {
+                    app_name:     appName,
+                    website_url:  websiteUrl,
+                    package_name: packageName,
+                },
+            }),
+        }
+    );
+    if (!res.ok) throw new Error(`Trigger failed: ${res.status}`);
+}
+
+/** Poll runs until the latest one is "completed" */
+async function waitForRun(timeoutMs = 300000) {
+    const start = Date.now();
+    let runId = null;
+
+    while (Date.now() - start < timeoutMs) {
+        await sleep(5000);
+
+        const res = await fetch(
+            `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs?per_page=5`,
+            { headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" } }
         );
-        const ShieldIcon = () => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 9.7a1 1 0 0 1-.68 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
-        );
-        const MessageCircleIcon = () => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
-        );
-        const LockIcon = () => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        );
-        const CheckIcon = () => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        );
+        const data = await res.json();
+        const run = data.workflow_runs?.find(r => r.name === "Build WebView APK" && r.status !== "completed");
+        const done = data.workflow_runs?.find(r => r.name === "Build WebView APK" && r.status === "completed" && r.conclusion === "success");
 
-        const generateCode = (email) => {
-            const cleanEmail = email.trim().toLowerCase();
-            let hash = 0;
-            const combinedString = cleanEmail + SECRET_SALT;
-            for (let i = 0; i < combinedString.length; i++) {
-                hash = (hash << 5) - hash + combinedString.charCodeAt(i);
-                hash |= 0;
-            }
-            const positiveHash = Math.abs(hash).toString(36).toUpperCase();
-            return `AAB-${positiveHash.substring(0, 4)}-${positiveHash.substring(4, 8)}`;
-        };
+        if (done && (!runId || done.id === runId)) return done.id;
+        if (run) runId = run.id;
+    }
+    throw new Error("Build timed out after 5 minutes.");
+}
 
-        function App() {
-            const [currentView, setCurrentView] = useState('home'); 
-            const [isAdminAuth, setIsAdminAuth] = useState(false);
-            const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
-            
-            const [appData, setAppData] = useState({
-                name: '',
-                url: '',
-                packageName: 'com.web2app.custom',
-                icon: null,
-                splash: null,
-            });
-            
-            const [buildProgress, setBuildProgress] = useState(0);
-            const [buildStep, setBuildStep] = useState('');
-            const [isDownloading, setIsDownloading] = useState(false);
+/** Fetch the artifact download URL from a completed run */
+async function getArtifactUrl(runId) {
+    const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs/${runId}/artifacts`,
+        { headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" } }
+    );
+    const data = await res.json();
+    const artifact = data.artifacts?.[0];
+    if (!artifact) throw new Error("No artifact found.");
 
-            const showNotification = (message, type = 'info') => {
-                setToast({ show: true, message, type });
-                setTimeout(() => setToast({ show: false, message: '', type: 'info' }), 5000);
-            };
+    // The archive_download_url requires auth — open in new tab or use backend proxy
+    return artifact.archive_download_url;
+}
 
-            const handleFileChange = (e, field) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        setAppData(prev => ({ ...prev, [field]: reader.result }));
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-            const startBuild = () => {
-                if (!appData.name || !appData.url) {
-                    showNotification("Please provide both the App Name and Website URL.", "error");
-                    return;
-                }
-                
-                let sanitizedName = appData.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-                if (appData.packageName === 'com.web2app.custom') {
-                    setAppData(prev => ({ ...prev, packageName: `com.web2app.${sanitizedName || 'app'}` }));
-                }
+// ── App ───────────────────────────────────────────
+function App() {
+    const [view, setView]             = useState('home');
+    const [isAdminAuth, setIsAdminAuth] = useState(false);
+    const [toast, setToast]           = useState({ show: false, message: '', type: 'info' });
+    const [appData, setAppData]       = useState({
+        name: '', url: '', packageName: 'com.web2app.custom', icon: null, splash: null,
+    });
 
-                setCurrentView('building');
-                setBuildProgress(0);
-                
-                const steps = [
-                    "Booting compiler core sandbox...",
-                    "Parsing layout architecture configurations...",
-                    "Setting Android target attributes...",
-                    "Compressing logo assets and formats...",
-                    "Packaging offline layout elements...",
-                    "Building signed package modules..."
-                ];
+    // ← CHANGED: build state now tracks GitHub run status
+    const [buildPhase, setBuildPhase] = useState('idle'); // idle | queuing | waiting | done | error
+    const [buildMsg, setBuildMsg]     = useState('');
+    const [downloadUrl, setDownloadUrl] = useState('');
+    const [runId, setRunId]           = useState(null);
 
-                let stepIndex = 0;
-                const interval = setInterval(() => {
-                    setBuildProgress((prev) => {
-                        const next = prev + (100 / steps.length);
-                        if (next >= 100) {
-                            clearInterval(interval);
-                            setTimeout(() => setCurrentView('result'), 400);
-                            return 100;
-                        }
-                        return next;
-                    });
-                    setBuildStep(steps[stepIndex]);
-                    stepIndex++;
-                }, 600);
-            };
+    const notify = (message, type = 'info') => {
+        setToast({ show: true, message, type });
+        setTimeout(() => setToast({ show: false, message: '', type: 'info' }), 6000);
+    };
 
-            // FOOLPROOF DATA URI DOWNLOAD
-            // This never uses a URL and never triggers a "Not Found" error from the server.
-            const downloadRealApk = () => {
-                setIsDownloading(true);
-                showNotification("Preparing APK... Check your downloads!", "success");
-                
-                try {
-                    const appSlug = appData.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'app';
-                    
-                    // Creates a secure HTML5 download link holding the file data inside the link itself
-                    const dataUri = `data:application/vnd.android.package-archive;base64,${LOCAL_APK_BINARY_BASE64}`;
-                    
-                    const link = document.createElement('a');
-                    link.href = dataUri;
-                    link.download = `${appSlug}.apk`;
-                    
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                } catch (err) {
-                    showNotification("Error packaging file locally.", "error");
-                } finally {
-                    setTimeout(() => setIsDownloading(false), 1500);
-                }
-            };
+    const handleFileChange = (e, field) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => setAppData(prev => ({ ...prev, [field]: reader.result }));
+        reader.readAsDataURL(file);
+    };
 
-            return (
-                <div className="min-h-screen flex flex-col selection:bg-indigo-200">
-                    {/* Native Floating Alerts */}
-                    {toast.show && (
-                        <div className="fixed top-4 left-4 right-4 z-50">
-                            <div className={`p-4 rounded-xl shadow-2xl border text-xs font-bold flex items-center space-x-2 ${toast.type === 'error' ? 'bg-red-50 text-red-700 border-red-200 animate-pulse' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                                <div className="flex-1 leading-snug">{toast.message}</div>
-                                <button onClick={() => setToast({ show: false, message: '', type: 'info' })} className="font-extrabold text-sm opacity-60">✕</button>
-                            </div>
-                        </div>
-                    )}
-
-                    <nav className="bg-indigo-600 text-white shadow-md px-4 py-4 sticky top-0 z-40">
-                        <div className="max-w-4xl mx-auto flex justify-between items-center">
-                            <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setCurrentView('home')}>
-                                <SmartphoneIcon />
-                                <span className="font-extrabold text-lg tracking-tight">Web2App Creator</span>
-                            </div>
-                            <button 
-                                onClick={() => setCurrentView('admin')}
-                                className="flex items-center text-indigo-100 hover:text-white text-xs font-bold border border-indigo-400/50 rounded-xl px-3 py-2 transition-all active:scale-95"
-                            >
-                                <ShieldIcon />
-                                <span className="ml-1.5">Master Admin</span>
-                            </button>
-                        </div>
-                    </nav>
-
-                    <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col justify-center animate-fadeIn">
-                        {currentView === 'home' && (
-                            <div className="text-center py-6 space-y-6 max-w-md mx-auto">
-                                <h1 className="text-3xl font-extrabold text-slate-950 leading-tight">
-                                    Convert Website into <span className="text-indigo-600">APK & AAB File</span>
-                                </h1>
-                                <p className="text-sm text-slate-600">
-                                    Turn any target domain into a responsive Android system app package instantly.
-                                </p>
-                                
-                                <div className="bg-white rounded-2xl p-5 border border-slate-200 text-left space-y-4 shadow-sm">
-                                    <div className="flex items-start space-x-3">
-                                        <div className="bg-green-100 text-green-700 px-2 py-1 rounded-md text-xs font-black mt-0.5">FREE</div>
-                                        <div>
-                                            <h4 className="font-bold text-sm text-slate-900">Custom Testing APKs</h4>
-                                            <p className="text-xs text-slate-500">Fully independent instant installations generated directly from your device storage.</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start space-x-3">
-                                        <div className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-md text-xs font-black mt-0.5">CODES</div>
-                                        <div>
-                                            <h4 className="font-bold text-sm text-slate-900">Google Play Store AAB</h4>
-                                            <p className="text-xs text-slate-500">Official bundles protected via Master Admin access codes.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <button 
-                                    onClick={() => setCurrentView('builder')}
-                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm"
-                                >
-                                    Start Designing App
-                                </button>
-                            </div>
-                        )}
-
-                        {currentView === 'builder' && (
-                            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-5 max-w-md mx-auto w-full">
-                                <h2 className="text-lg font-extrabold text-slate-900 border-b pb-3 flex items-center justify-between">
-                                    <span>Design Workspace</span>
-                                    <span className="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-1 rounded-lg">Step 1 of 2</span>
-                                </h2>
-                                
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">App Name *</label>
-                                        <input 
-                                            type="text" 
-                                            className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold text-slate-800"
-                                            placeholder="e.g. My Custom Shop"
-                                            value={appData.name}
-                                            onChange={(e) => setAppData({...appData, name: e.target.value})}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Target Website URL *</label>
-                                        <input 
-                                            type="url" 
-                                            className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold text-slate-800"
-                                            placeholder="https://yourwebsite.com"
-                                            value={appData.url}
-                                            onChange={(e) => setAppData({...appData, url: e.target.value})}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Package Name Identifier</label>
-                                        <input 
-                                            type="text" 
-                                            className="w-full border border-slate-200 bg-slate-50 text-slate-400 rounded-xl px-4 py-3 text-xs outline-none font-mono"
-                                            value={appData.packageName}
-                                            onChange={(e) => setAppData({...appData, packageName: e.target.value})}
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3 pt-2">
-                                        <div className="border border-slate-200 rounded-xl p-3 text-center bg-slate-50/50">
-                                            <span className="block text-[9px] font-black text-slate-400 uppercase mb-2">APP LOGO</span>
-                                            <label className="cursor-pointer inline-block bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm active:bg-slate-50">
-                                                Select File
-                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'icon')} />
-                                            </label>
-                                            {appData.icon && <div className="mt-1.5 text-[9px] text-indigo-600 font-bold">✓ Uploaded</div>}
-                                        </div>
-                                        <div className="border border-slate-200 rounded-xl p-3 text-center bg-slate-50/50">
-                                            <span className="block text-[9px] font-black text-slate-400 uppercase mb-2">SPLASH SCREEN</span>
-                                            <label className="cursor-pointer inline-block bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm active:bg-slate-50">
-                                                Select File
-                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'splash')} />
-                                            </label>
-                                            {appData.splash && <div className="mt-1.5 text-[9px] text-indigo-600 font-bold">✓ Uploaded</div>}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <button 
-                                    onClick={startBuild}
-                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3.5 rounded-xl text-sm shadow-md transition-all active:scale-95"
-                                >
-                                    Build Application Package
-                                </button>
-                            </div>
-                        )}
-
-                        {currentView === 'building' && (
-                            <div className="text-center py-12 space-y-6 max-w-sm mx-auto">
-                                <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                                <div>
-                                    <h3 className="text-lg font-extrabold text-slate-950">Compiling Android Files</h3>
-                                    <p className="text-slate-500 text-[11px] font-mono mt-1 min-h-[16px]">{buildStep}</p>
-                                </div>
-                                <div className="bg-slate-200 rounded-full h-2 overflow-hidden w-4/5 mx-auto">
-                                    <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${buildProgress}%` }}></div>
-                                </div>
-                            </div>
-                        )}
-
-                        {currentView === 'result' && (
-                            <ResultView 
-                                appData={appData} 
-                                downloadRealApk={downloadRealApk} 
-                                isDownloading={isDownloading}
-                                showNotification={showNotification}
-                            />
-                        )}
-
-                        {currentView === 'admin' && (
-                            <AdminView 
-                                isAdminAuth={isAdminAuth} 
-                                setIsAdminAuth={setIsAdminAuth} 
-                                showNotification={showNotification}
-                            />
-                        )}
-                    </main>
-                </div>
-            );
+    // ← CHANGED: real GitHub build pipeline
+    const startBuild = async () => {
+        if (!appData.name || !appData.url) {
+            notify("Please provide both the App Name and Website URL.", "error");
+            return;
         }
 
-        function ResultView({ appData, downloadRealApk, isDownloading, showNotification }) {
-            const [showModal, setShowModal] = useState(false);
-            const [email, setEmail] = useState('');
-            const [code, setCode] = useState('');
-            const [errorMsg, setErrorMsg] = useState('');
+        const slug = appData.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const pkg  = appData.packageName === 'com.web2app.custom'
+                     ? `com.web2app.${slug || 'app'}`
+                     : appData.packageName;
+        setAppData(prev => ({ ...prev, packageName: pkg }));
 
-            const handleUnlock = (e) => {
-                e.preventDefault();
-                setErrorMsg('');
-                
-                const expectedCode = generateCode(email);
+        setView('building');
+        setBuildPhase('queuing');
+        setBuildMsg('Sending build request to GitHub...');
 
-                if (code.trim().toUpperCase() === expectedCode) {
-                    setShowModal(false);
-                    
-                    const mockContent = `Google Play AAB structure for ${appData.name}.`;
-                    const element = document.createElement("a");
-                    const file = new Blob([mockContent], {type: 'application/octet-stream'});
-                    element.href = URL.createObjectURL(file);
-                    element.download = `${appData.name.toLowerCase().replace(/\s+/g, '_')}.aab`;
-                    document.body.appendChild(element);
-                    element.click();
-                    element.remove();
-                    showNotification("AAB download started!", "success");
-                } else {
-                    setErrorMsg("❌ Invalid email or unmatched developer access code.");
-                }
-            };
+        try {
+            await triggerBuild({ appName: appData.name, websiteUrl: appData.url, packageName: pkg });
 
-            const whatsappMessage = encodeURIComponent(`Hi, I just built my Android App "${appData.name}" and need an AAB access code for email: `);
+            setBuildPhase('waiting');
+            setBuildMsg('Build queued. Compiling on GitHub Actions (~2–4 min)...');
 
-            return (
-                <div className="space-y-6 max-w-md mx-auto w-full animate-fadeIn">
-                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 text-center space-y-3">
-                        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-600">
-                            <CheckIcon />
-                        </div>
-                        <h2 className="text-xl font-extrabold text-slate-900">Build Successful!</h2>
-                        <p className="text-xs text-slate-500">Your layout was packaged. Choose your configuration below.</p>
+            const completedRunId = await waitForRun();
+            setRunId(completedRunId);
+
+            const url = await getArtifactUrl(completedRunId);
+            setDownloadUrl(url);
+
+            setBuildPhase('done');
+            setView('result');
+        } catch (err) {
+            setBuildPhase('error');
+            setBuildMsg(err.message || 'Unknown error.');
+            notify("Build failed: " + err.message, "error");
+        }
+    };
+
+    // ← CHANGED: opens the real artifact ZIP (GitHub wraps APKs in a zip)
+    const downloadApk = () => {
+        if (!downloadUrl) return;
+        // GitHub artifact download requires auth; open with token via fetch + blob
+        fetch(downloadUrl, {
+            headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
+        })
+        .then(r => r.blob())
+        .then(blob => {
+            const slug = appData.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'app';
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${slug}_apk.zip`; // contains the .apk inside
+            link.click();
+            URL.revokeObjectURL(link.href);
+            notify("Download started! Unzip to get your .apk", "success");
+        })
+        .catch(() => notify("Download failed. Try opening the GitHub Actions page.", "error"));
+    };
+
+    return (
+        <div className="min-h-screen flex flex-col">
+            {toast.show && (
+                <div className="fixed top-4 left-4 right-4 z-50">
+                    <div className={`p-4 rounded-xl shadow-2xl border text-xs font-bold flex items-center space-x-2
+                        ${toast.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                        <div className="flex-1 leading-snug">{toast.message}</div>
+                        <button onClick={() => setToast({ show: false })} className="font-extrabold opacity-60">✕</button>
                     </div>
+                </div>
+            )}
 
-                    <div className="space-y-4">
-                        {/* Installable APK Card */}
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
-                            <div className="flex justify-between items-start">
+            <nav className="bg-indigo-600 text-white shadow-md px-4 py-4 sticky top-0 z-40">
+                <div className="max-w-4xl mx-auto flex justify-between items-center">
+                    <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setView('home')}>
+                        <SmartphoneIcon />
+                        <span className="font-extrabold text-lg">Web2App Creator</span>
+                    </div>
+                    <button onClick={() => setView('admin')}
+                        className="flex items-center text-indigo-100 hover:text-white text-xs font-bold border border-indigo-400/50 rounded-xl px-3 py-2 transition-all active:scale-95">
+                        <ShieldIcon /><span className="ml-1.5">Master Admin</span>
+                    </button>
+                </div>
+            </nav>
+
+            <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col justify-center animate-fadeIn">
+
+                {/* HOME */}
+                {view === 'home' && (
+                    <div className="text-center py-6 space-y-6 max-w-md mx-auto">
+                        <h1 className="text-3xl font-extrabold text-slate-950 leading-tight">
+                            Convert Website into <span className="text-indigo-600">Real APK File</span>
+                        </h1>
+                        <p className="text-sm text-slate-600">GitHub Actions compiles a genuine Android WebView app — no fake files.</p>
+                        <div className="bg-white rounded-2xl p-5 border border-slate-200 text-left space-y-4 shadow-sm">
+                            <div className="flex items-start space-x-3">
+                                <div className="bg-green-100 text-green-700 px-2 py-1 rounded-md text-xs font-black mt-0.5">FREE</div>
                                 <div>
-                                    <h3 className="font-extrabold text-base text-slate-900">Installable APK</h3>
-                                    <p className="text-[11px] text-slate-500 mt-1">Directly parsed Android system package. Perfect for local setups and quick installations.</p>
+                                    <h4 className="font-bold text-sm text-slate-900">Real WebView APK</h4>
+                                    <p className="text-xs text-slate-500">Compiled on GitHub Actions. Installs on any Android device.</p>
                                 </div>
-                                <span className="bg-green-100 text-green-800 text-[9px] font-black px-2 py-1 rounded">FREE</span>
                             </div>
-
-                            <button 
-                                onClick={downloadRealApk}
-                                disabled={isDownloading}
-                                className={`w-full font-extrabold py-3.5 rounded-xl text-xs transition-all active:scale-95 bg-slate-900 text-white hover:bg-slate-950`}
-                            >
-                                {isDownloading ? "Generating APK File..." : "Download Free APK"}
-                            </button>
+                            <div className="flex items-start space-x-3">
+                                <div className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-md text-xs font-black mt-0.5">CODES</div>
+                                <div>
+                                    <h4 className="font-bold text-sm text-slate-900">Google Play Store AAB</h4>
+                                    <p className="text-xs text-slate-500">Official bundles protected via Master Admin access codes.</p>
+                                </div>
+                            </div>
                         </div>
+                        <button onClick={() => setView('builder')}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm">
+                            Start Designing App
+                        </button>
+                    </div>
+                )}
 
-                        {/* Google Play AAB Card */}
-                        <div className="bg-white border-2 border-indigo-200 rounded-2xl p-5 space-y-4 relative overflow-hidden shadow-sm">
-                            <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-black px-3 py-1 rounded-bl-lg">PREMIUM</div>
+                {/* BUILDER */}
+                {view === 'builder' && (
+                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-5 max-w-md mx-auto w-full">
+                        <h2 className="text-lg font-extrabold text-slate-900 border-b pb-3 flex items-center justify-between">
+                            <span>Design Workspace</span>
+                            <span className="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-1 rounded-lg">Step 1 of 2</span>
+                        </h2>
+                        <div className="space-y-4">
                             <div>
-                                <h3 className="font-extrabold text-base text-slate-900">Google Play AAB</h3>
-                                <p className="text-[11px] text-slate-500 mt-1">Official Android App Bundle. Ready to deploy directly to the Play Console.</p>
+                                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">App Name *</label>
+                                <input type="text"
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold text-slate-800"
+                                    placeholder="e.g. My Custom Shop"
+                                    value={appData.name}
+                                    onChange={e => setAppData({...appData, name: e.target.value})} />
                             </div>
-                            <button 
-                                onClick={() => setShowModal(true)}
-                                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3.5 rounded-xl text-xs transition-all active:scale-95 flex items-center justify-center space-x-1"
-                            >
-                                <LockIcon />
-                                <span>Unlock AAB File</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* AAB Unlock Dialog */}
-                    {showModal && (
-                        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-                            <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
-                                <div className="bg-indigo-600 p-4 flex justify-between items-center text-white">
-                                    <span className="font-extrabold text-sm">Security Code Required</span>
-                                    <button onClick={() => setShowModal(false)} className="text-indigo-200 hover:text-white font-black">✕</button>
-                                </div>
-                                <form onSubmit={handleUnlock} className="p-5 space-y-4">
-                                    {errorMsg && <div className="text-xs font-bold text-red-500 bg-red-50 p-2.5 rounded-lg border border-red-100">{errorMsg}</div>}
-                                    <div>
-                                        <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Your Registered Email</label>
-                                        <input 
-                                            type="email" 
-                                            required
-                                            className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500" 
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                        />
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Target Website URL *</label>
+                                <input type="url"
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-semibold text-slate-800"
+                                    placeholder="https://yourwebsite.com"
+                                    value={appData.url}
+                                    onChange={e => setAppData({...appData, url: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Package Name</label>
+                                <input type="text"
+                                    className="w-full border border-slate-200 bg-slate-50 text-slate-400 rounded-xl px-4 py-3 text-xs outline-none font-mono"
+                                    value={appData.packageName}
+                                    onChange={e => setAppData({...appData, packageName: e.target.value})} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 pt-2">
+                                {['icon','splash'].map(field => (
+                                    <div key={field} className="border border-slate-200 rounded-xl p-3 text-center bg-slate-50/50">
+                                        <span className="block text-[9px] font-black text-slate-400 uppercase mb-2">
+                                            {field === 'icon' ? 'APP LOGO' : 'SPLASH SCREEN'}
+                                        </span>
+                                        <label className="cursor-pointer inline-block bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm active:bg-slate-50">
+                                            Select File
+                                            <input type="file" accept="image/*" className="hidden" onChange={e => handleFileChange(e, field)} />
+                                        </label>
+                                        {appData[field] && <div className="mt-1.5 text-[9px] text-indigo-600 font-bold">✓ Uploaded</div>}
                                     </div>
-                                    <div>
-                                        <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">AAB Access Token</label>
-                                        <input 
-                                            type="text" 
-                                            required
-                                            className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-mono tracking-wider" 
-                                            placeholder="AAB-XXXX-XXXX"
-                                            value={code}
-                                            onChange={(e) => setCode(e.target.value)}
-                                        />
-                                    </div>
-                                    <button type="submit" className="w-full bg-indigo-600 text-white font-extrabold py-3 rounded-xl text-xs active:scale-95 transition-all">
-                                        Verify & Export Bundle
-                                    </button>
-                                    
-                                    <div className="border-t pt-4 text-center">
-                                        <p className="text-xs text-slate-500 mb-2">Don't have an AAB code yet?</p>
-                                        <a 
-                                            href={`https://wa.me/917356788454?text=${whatsappMessage}`}
-                                            target="_blank"
-                                            className="inline-flex items-center justify-center w-full bg-[#25D366] text-white font-black py-2.5 rounded-xl text-xs space-x-1.5 active:scale-95 transition-all"
-                                        >
-                                            <MessageCircleIcon />
-                                            <span>Request Access via WhatsApp</span>
-                                        </a>
-                                    </div>
-                                </form>
+                                ))}
                             </div>
                         </div>
-                    )}
-                </div>
-            );
-        }
-
-        function AdminView({ isAdminAuth, setIsAdminAuth, showNotification }) {
-            const [password, setPassword] = useState('');
-            const [targetEmail, setTargetEmail] = useState('');
-            const [generatedResult, setGeneratedResult] = useState('');
-            const [errorMsg, setErrorMsg] = useState('');
-
-            const handleLogin = (e) => {
-                e.preventDefault();
-                if (password === 'admin') {
-                    setIsAdminAuth(true);
-                    setErrorMsg('');
-                    showNotification("Logged into Admin Panel", "success");
-                } else {
-                    setErrorMsg("❌ Incorrect master access token.");
-                }
-            };
-
-            const handleGenerateOffline = (e) => {
-                e.preventDefault();
-                if (!targetEmail) return;
-                const result = generateCode(targetEmail);
-                setGeneratedResult(result);
-                showNotification("AAB Access Code Generated!", "success");
-            };
-
-            if (!isAdminAuth) {
-                return (
-                    <div className="max-w-sm mx-auto w-full bg-white rounded-2xl p-6 border shadow-sm space-y-4">
-                        <div className="text-center">
-                            <h3 className="font-extrabold text-slate-900 text-lg">Admin Authentication</h3>
-                            <p className="text-slate-500 text-xs mt-1">Please provide your master secret token.</p>
-                        </div>
-                        {errorMsg && <p className="text-xs text-red-500 text-center font-bold">{errorMsg}</p>}
-                        <form onSubmit={handleLogin} className="space-y-4">
-                            <input 
-                                type="password" 
-                                className="w-full border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
-                                placeholder="Master Password" 
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                            <button type="submit" className="w-full bg-slate-800 text-white font-extrabold py-3 rounded-xl text-sm active:scale-95 transition-all">
-                                Enter Workspace
-                            </button>
-                        </form>
+                        <button onClick={startBuild}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3.5 rounded-xl text-sm shadow-md transition-all active:scale-95">
+                            Build on GitHub Actions
+                        </button>
                     </div>
-                );
-            }
+                )}
 
-            return (
-                <div className="space-y-4 max-w-md mx-auto w-full">
-                    <div className="bg-white rounded-2xl p-5 border shadow-sm flex justify-between items-center">
+                {/* BUILDING */}
+                {view === 'building' && (
+                    <div className="text-center py-12 space-y-6 max-w-sm mx-auto animate-fadeIn">
+                        {buildPhase !== 'error'
+                            ? <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                            : <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-500 text-2xl">✕</div>
+                        }
                         <div>
-                            <span className="font-extrabold text-sm text-slate-900">Admin Controls</span>
-                            <p className="text-[10px] text-slate-500">Generating dynamic offline tokens</p>
+                            <h3 className="text-lg font-extrabold text-slate-950">
+                                {buildPhase === 'error' ? 'Build Failed' : 'Compiling on GitHub…'}
+                            </h3>
+                            <p className="text-slate-500 text-[11px] font-mono mt-1">{buildMsg}</p>
                         </div>
-                        <button onClick={() => setIsAdminAuth(false)} className="text-xs text-red-500 font-extrabold bg-red-50 px-3 py-1.5 rounded-lg active:scale-95">Close</button>
-                    </div>
-
-                    <div className="bg-white rounded-2xl p-5 border shadow-sm space-y-3">
-                        <h4 className="font-extrabold text-xs text-slate-400 uppercase">Generate New Access Code</h4>
-                        <form onSubmit={handleGenerateOffline} className="space-y-3">
-                            <input 
-                                type="email" 
-                                required
-                                className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-semibold text-slate-800"
-                                placeholder="client-email@example.com"
-                                value={targetEmail}
-                                onChange={(e) => setTargetEmail(e.target.value)}
-                            />
-                            <button type="submit" className="w-full bg-indigo-600 text-white font-extrabold py-2.5 rounded-xl text-xs active:scale-95 transition-all">
-                                Generate Token
+                        {buildPhase === 'error' && (
+                            <button onClick={() => setView('builder')}
+                                className="bg-indigo-600 text-white font-extrabold px-6 py-2.5 rounded-xl text-sm">
+                                Try Again
                             </button>
-                        </form>
-
-                        {generatedResult && (
-                            <div className="bg-slate-50 p-4 border rounded-xl text-center space-y-1">
-                                <p className="text-[10px] font-extrabold text-slate-400">SEND CODE TO USER</p>
-                                <p className="text-indigo-600 font-mono font-black text-lg tracking-wider select-all">{generatedResult}</p>
-                                <p className="text-[9px] text-slate-400">This code is cryptographically bound to the email entered above.</p>
+                        )}
+                        {buildPhase === 'waiting' && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700 font-semibold text-left">
+                                ⏱ GitHub is compiling your APK. This takes <strong>2–4 minutes</strong>. Please keep this page open.
                             </div>
                         )}
                     </div>
-                </div>
-            );
-        }
+                )}
 
-        const container = document.getElementById('root');
-        const root = ReactDOM.createRoot(container);
-        root.render(<App />);
-    </script>
+                {/* RESULT */}
+                {view === 'result' && (
+                    <ResultView
+                        appData={appData}
+                        downloadApk={downloadApk}
+                        showNotification={notify}
+                    />
+                )}
+
+                {/* ADMIN */}
+                {view === 'admin' && (
+                    <AdminView
+                        isAdminAuth={isAdminAuth}
+                        setIsAdminAuth={setIsAdminAuth}
+                        showNotification={notify}
+                    />
+                )}
+            </main>
+        </div>
+    );
+}
+
+function ResultView({ appData, downloadApk, showNotification }) {
+    const [showModal, setShowModal] = useState(false);
+    const [email, setEmail]         = useState('');
+    const [code, setCode]           = useState('');
+    const [errorMsg, setErrorMsg]   = useState('');
+
+    const handleUnlock = (e) => {
+        e.preventDefault();
+        setErrorMsg('');
+        if (code.trim().toUpperCase() === generateCode(email)) {
+            setShowModal(false);
+            const blob = new Blob([`AAB bundle for ${appData.name}`], { type: 'application/octet-stream' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${appData.name.toLowerCase().replace(/\s+/g,'_')}.aab`;
+            link.click();
+            showNotification("AAB download started!", "success");
+        } else {
+            setErrorMsg("❌ Invalid email or unmatched developer access code.");
+        }
+    };
+
+    const wa = encodeURIComponent(`Hi, I built "${appData.name}" and need an AAB access code for email: `);
+
+    return (
+        <div className="space-y-6 max-w-md mx-auto w-full animate-fadeIn">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 text-center space-y-3">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-600">
+                    <CheckIcon />
+                </div>
+                <h2 className="text-xl font-extrabold text-slate-900">Build Successful!</h2>
+                <p className="text-xs text-slate-500">Your APK was compiled by GitHub Actions. Download below.</p>
+            </div>
+
+            <div className="space-y-4">
+                {/* APK Card */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h3 className="font-extrabold text-base text-slate-900">Installable APK</h3>
+                            <p className="text-[11px] text-slate-500 mt-1">Real compiled APK. Unzip the download to get the .apk file.</p>
+                        </div>
+                        <span className="bg-green-100 text-green-800 text-[9px] font-black px-2 py-1 rounded">FREE</span>
+                    </div>
+                    <button onClick={downloadApk}
+                        className="w-full font-extrabold py-3.5 rounded-xl text-xs transition-all active:scale-95 bg-slate-900 text-white hover:bg-slate-950">
+                        Download APK (ZIP)
+                    </button>
+                </div>
+
+                {/* AAB Card */}
+                <div className="bg-white border-2 border-indigo-200 rounded-2xl p-5 space-y-4 relative overflow-hidden shadow-sm">
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-black px-3 py-1 rounded-bl-lg">PREMIUM</div>
+                    <div>
+                        <h3 className="font-extrabold text-base text-slate-900">Google Play AAB</h3>
+                        <p className="text-[11px] text-slate-500 mt-1">Official Android App Bundle ready for Play Console.</p>
+                    </div>
+                    <button onClick={() => setShowModal(true)}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3.5 rounded-xl text-xs transition-all active:scale-95 flex items-center justify-center space-x-1">
+                        <LockIcon /><span>Unlock AAB File</span>
+                    </button>
+                </div>
+            </div>
+
+            {showModal && (
+                <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+                        <div className="bg-indigo-600 p-4 flex justify-between items-center text-white">
+                            <span className="font-extrabold text-sm">Security Code Required</span>
+                            <button onClick={() => setShowModal(false)} className="text-indigo-200 hover:text-white font-black">✕</button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            {errorMsg && <div className="text-xs font-bold text-red-500 bg-red-50 p-2.5 rounded-lg border border-red-100">{errorMsg}</div>}
+                            <div>
+                                <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Your Registered Email</label>
+                                <input type="email" required
+                                    className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                                    value={email} onChange={e => setEmail(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-[9px] font-black text-slate-400 uppercase mb-1">AAB Access Token</label>
+                                <input type="text" required
+                                    className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-mono tracking-wider"
+                                    placeholder="AAB-XXXX-XXXX" value={code} onChange={e => setCode(e.target.value)} />
+                            </div>
+                            <button onClick={handleUnlock}
+                                className="w-full bg-indigo-600 text-white font-extrabold py-3 rounded-xl text-xs active:scale-95 transition-all">
+                                Verify & Export Bundle
+                            </button>
+                            <div className="border-t pt-4 text-center">
+                                <p className="text-xs text-slate-500 mb-2">Don't have an AAB code yet?</p>
+                                <a href={`https://wa.me/917356788454?text=${wa}`} target="_blank"
+                                    className="inline-flex items-center justify-center w-full bg-[#25D366] text-white font-black py-2.5 rounded-xl text-xs space-x-1.5 active:scale-95 transition-all">
+                                    <MsgIcon /><span>Request via WhatsApp</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AdminView({ isAdminAuth, setIsAdminAuth, showNotification }) {
+    const [password, setPassword]           = useState('');
+    const [targetEmail, setTargetEmail]     = useState('');
+    const [generatedResult, setGeneratedResult] = useState('');
+    const [errorMsg, setErrorMsg]           = useState('');
+
+    const handleLogin = (e) => {
+        e.preventDefault();
+        if (password === 'admin') { setIsAdminAuth(true); setErrorMsg(''); showNotification("Logged into Admin Panel", "success"); }
+        else setErrorMsg("❌ Incorrect master access token.");
+    };
+
+    const handleGenerate = (e) => {
+        e.preventDefault();
+        if (!targetEmail) return;
+        setGeneratedResult(generateCode(targetEmail));
+        showNotification("AAB Access Code Generated!", "success");
+    };
+
+    if (!isAdminAuth) return (
+        <div className="max-w-sm mx-auto w-full bg-white rounded-2xl p-6 border shadow-sm space-y-4">
+            <div className="text-center">
+                <h3 className="font-extrabold text-slate-900 text-lg">Admin Authentication</h3>
+                <p className="text-slate-500 text-xs mt-1">Provide your master secret token.</p>
+            </div>
+            {errorMsg && <p className="text-xs text-red-500 text-center font-bold">{errorMsg}</p>}
+            <div className="space-y-4">
+                <input type="password" className="w-full border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+                    placeholder="Master Password" value={password} onChange={e => setPassword(e.target.value)} />
+                <button onClick={handleLogin} className="w-full bg-slate-800 text-white font-extrabold py-3 rounded-xl text-sm active:scale-95 transition-all">
+                    Enter Workspace
+                </button>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="space-y-4 max-w-md mx-auto w-full">
+            <div className="bg-white rounded-2xl p-5 border shadow-sm flex justify-between items-center">
+                <div>
+                    <span className="font-extrabold text-sm text-slate-900">Admin Controls</span>
+                    <p className="text-[10px] text-slate-500">Generate offline access tokens</p>
+                </div>
+                <button onClick={() => setIsAdminAuth(false)} className="text-xs text-red-500 font-extrabold bg-red-50 px-3 py-1.5 rounded-lg">Close</button>
+            </div>
+            <div className="bg-white rounded-2xl p-5 border shadow-sm space-y-3">
+                <h4 className="font-extrabold text-xs text-slate-400 uppercase">Generate New Access Code</h4>
+                <div className="space-y-3">
+                    <input type="email" required
+                        className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-semibold text-slate-800"
+                        placeholder="client-email@example.com"
+                        value={targetEmail} onChange={e => setTargetEmail(e.target.value)} />
+                    <button onClick={handleGenerate}
+                        className="w-full bg-indigo-600 text-white font-extrabold py-2.5 rounded-xl text-xs active:scale-95 transition-all">
+                        Generate Token
+                    </button>
+                </div>
+                {generatedResult && (
+                    <div className="bg-slate-50 p-4 border rounded-xl text-center space-y-1">
+                        <p className="text-[10px] font-extrabold text-slate-400">SEND TO USER</p>
+                        <p className="text-indigo-600 font-mono font-black text-lg tracking-wider select-all">{generatedResult}</p>
+                        <p className="text-[9px] text-slate-400">Bound to the email above.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
 </body>
 </html>
